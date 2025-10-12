@@ -1,3 +1,8 @@
+# Custom
+scripts/*
+.python-version
+*.txt
+
 # Byte-compiled / optimized / DLL files
 __pycache__/
 *.py[codz]

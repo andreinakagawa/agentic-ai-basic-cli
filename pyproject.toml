@@ -1,0 +1,25 @@
+[project]
+name = "agentic-ai-basic-cli"
+version = "0.1.0"
+description = "Add your description here"
+readme = "README.md"
+requires-python = ">=3.11"
+dependencies = [
+    "agno==2.1.2",
+    "click>=8.1.0",
+    "duckdb==1.4.1",
+    "openai==2.2.0",
+    "pandas>=2.0.0",
+    "pyarrow>=21.0.0",
+    "pydantic>=2.0.0",
+    "pytest-cov>=7.0.0",
+    "python-dotenv>=1.0.0",
+    "rich>=13.0.0",
+]
+
+[dependency-groups]
+dev = [
+    "pytest>=7.0.0",
+    "pytest-asyncio>=1.2.0",
+    "ruff>=0.13.3",
+]
