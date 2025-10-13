@@ -1,10 +1,12 @@
-# Architecture - Agentic AI CLI Framework
+# Architecture
 
 ## Overview
 
 The Agentic AI CLI Framework is a generic, pluggable framework for building and testing conversational AI agents. It provides a complete CLI interface with session management, message history, and conversation export - all while remaining completely agent-agnostic.
 
-This framework was extracted from a specialized AI Data Analyst CLI project, with all domain-specific functionality removed to create a reusable foundation for any agentic system.
+**For a quick introduction, see [getting-started.md](./getting-started.md).**
+
+This document describes the core architecture, key design decisions, and how components interact.
 
 ## High-Level Architecture
 
@@ -17,8 +19,10 @@ graph TD
     C --> D3[OpenAI Agent]
     C --> D4[Anthropic Agent]
     B --> E[Session State]
+    B --> H[Context Tracker]
     E --> F[Message History]
     E --> G[Chat Exporter]
+    H --> I[Memory Cleanup]
 ```
 
 ## Component Architecture
@@ -30,6 +34,11 @@ graph LR
         SM[Session Manager]
         SESS[Session State]
         FMT[Formatters]
+    end
+
+    subgraph "Memory Management"
+        CT[Context Tracker]
+        CLEANUP[Message Cleanup]
     end
 
     subgraph "Agent Module - User Implemented"
@@ -45,14 +54,17 @@ graph LR
 
     CLI --> SM
     SM --> SESS
+    SM --> CT
     SM --> INT
     SM --> FMT
+    CT --> CLEANUP
     INT --> MOCK
     INT --> CUSTOM
     MOCK --> TYPES
     CUSTOM --> TYPES
     CUSTOM --> CONFIG
     SM --> TYPES
+    CLEANUP --> TYPES
 ```
 
 ## Data Flow
@@ -62,21 +74,33 @@ sequenceDiagram
     participant User
     participant CLI
     participant SessionManager
+    participant ContextTracker
     participant Agent
     participant Session
 
     User->>CLI: start session
-    CLI->>SessionManager: initialize
+    CLI->>Agent: create instance
+    CLI->>SessionManager: initialize(agent)
     SessionManager->>Session: create new session
-    SessionManager->>Agent: create instance
+    SessionManager->>ContextTracker: create tracker
 
     User->>CLI: type message
     CLI->>SessionManager: handle input
     SessionManager->>Session: add user message
     SessionManager->>Agent: process(context)
-    Agent-->>SessionManager: AgentResponse
+    Agent-->>SessionManager: AgentResponse (with token metadata)
     SessionManager->>Session: add assistant message
-    SessionManager-->>CLI: formatted response
+    SessionManager->>ContextTracker: add tokens
+
+    alt tokens >= 90% threshold
+        SessionManager->>ContextTracker: needs_cleanup()?
+        ContextTracker-->>SessionManager: true
+        SessionManager->>Session: cleanup old messages
+        SessionManager->>ContextTracker: remove tokens
+        SessionManager-->>User: ⚠ Context cleanup notification
+    end
+
+    SessionManager-->>CLI: formatted response + context %
     CLI-->>User: display
 
     User->>CLI: /export
@@ -104,6 +128,10 @@ agentic-ai-cli/
 │   │   ├── parser.py            # Command parsing
 │   │   └── exporter.py          # Chat export formatting
 │   │
+│   ├── memory/                   # Context and memory management
+│   │   ├── __init__.py
+│   │   └── context_tracker.py   # Token tracking and cleanup
+│   │
 │   └── common/                   # Shared utilities
 │       ├── __init__.py
 │       ├── config.py            # AgentConfig
@@ -116,12 +144,17 @@ agentic-ai-cli/
 │   ├── common/                  # Common tests
 │   └── fixtures/                # Test data and mocks
 │
+├── examples/
+│   ├── custom_agent.py          # Example custom agent implementation
+│   ├── echo_agent.py            # Simple echo agent
+│   └── llm_agent.py             # Example LLM-powered agent
 │
 ├── docs/
-│   ├── framework_architecture.md    # This file
-│   ├── framework_development.md     # Migration and development plan
-│   ├── architecture.md              # Original data analyst architecture (reference)
-│   └── migration_plan.md            # Original migration guide (reference)
+│   ├── getting-started.md           # Quick start guide
+│   ├── architecture.md              # This file - core architecture
+│   ├── developer-guide.md           # Implementation guide - TODO
+│   ├── operations.md                # Security, performance, deployment - TODO
+│   └── roadmap.md                   # Future enhancements - TODO
 │
 ├── .env.example
 ├── .gitignore
@@ -146,7 +179,7 @@ agentic-ai-cli/
 **Implementation**:
 - `AgentInterface`: Generic abstract interface defining the contract
 - Implementations: `async def process(context: AgentContext) -> AgentResponse`
-- Each agent manages its own provider integration via `AgentConfig`
+- Each agent manages its own provider integration (optionally using `AgentConfig` convenience class)
 - Framework provides `MockAgent` for testing
 
 ### 2. Stateless Agent Design
@@ -166,21 +199,23 @@ agentic-ai-cli/
 - SessionManager maintains state in CLI layer
 - Agent is pure function: context in → response out
 
-### 3. Dependency Injection Throughout
+### 3. Agent Self-Configuration
 
-**Decision**: All dependencies passed via constructors, no global state.
+**Decision**: Agents handle their own configuration and dependency loading.
 
 **Rationale**:
-- Makes code testable (easy to inject mocks)
-- Explicit dependencies improve code clarity
-- Enables runtime configuration
-- Required for true portability
+- Makes agents truly independent and self-contained
+- Agents can use any configuration strategy (env vars, config files, defaults)
+- CLI doesn't need to know about agent-specific config needs
+- Easier to use agents in different contexts (CLI, web, notebooks, batch)
+- Each agent type can have different configuration requirements
 
 **Implementation**:
-- Agents receive `AgentConfig` in constructor
-- No environment variable reading in agent code
+- Agents accept optional parameters in constructor (with sensible defaults)
+- Agents load their own environment variables or configuration
+- Framework provides `AgentConfig` as optional convenience class in `common/`
 - No singletons or global state
-- CLI layer handles config loading from environment
+- CLI simply instantiates agents without knowing their internal config structure
 
 ### 4. CLI-Agent Boundary
 
@@ -215,6 +250,36 @@ agentic-ai-cli/
 - Export functionality built-in
 - Future: can add persistence without changing agent interface
 
+### 6. Context Window Management
+
+**Decision**: Automatic token tracking with intelligent message cleanup.
+
+**Rationale**:
+- Long conversations can exceed LLM context windows
+- Manual cleanup is tedious and error-prone
+- Automatic cleanup maintains conversation coherence
+- Predictable behavior with configurable thresholds
+- Transparent to users with visual indicators
+
+**Implementation**:
+- `ContextTracker`: Monitors token usage as percentage of context window
+- **Cleanup Threshold**: 90% usage triggers automatic cleanup
+- **Target After Cleanup**: Reduce to 60% usage
+- **Preservation Strategy**:
+  - Never remove system messages
+  - Always keep last N messages (default 5) for coherence
+  - FIFO removal of older user/assistant messages
+- **User Feedback**:
+  - Visual context percentage after each response (color-coded: green <70%, yellow 70-89%, red ≥90%)
+  - Notification when cleanup occurs
+- **Configurable**: Context window size set at SessionManager initialization (default 100,000 tokens)
+
+**Benefits**:
+- Enables indefinitely long conversations
+- No context overflow errors
+- Maintains recent conversation context
+- Users remain aware of memory usage
+
 ## Core Types
 
 ### Message
@@ -241,7 +306,7 @@ class AgentResponse(BaseModel):
     metadata: dict[str, Any]        # Additional metadata (usage, tokens, etc.)
 ```
 
-### AgentConfig
+### AgentConfig (Optional Convenience Class)
 ```python
 class AgentConfig(BaseModel):
     system_prompt: str | None       # System prompt for the agent
@@ -249,199 +314,11 @@ class AgentConfig(BaseModel):
     temperature: float              # Temperature setting
     max_tokens: int | None          # Max tokens for response
     api_key: str | None             # API key (if needed)
-    # ... other config fields
+    # ... other config fields as needed by specific agents
 ```
 
-## Portability Guidelines
+**Note**: `AgentConfig` is provided as a convenience class in `common/` for agents to use internally if they wish. Agents are free to use it, extend it, or ignore it completely in favor of their own configuration approach.
 
-### What Makes the Framework Portable
-
-1. **Zero Domain Dependencies**: No domain-specific code in the framework
-2. **Clear Interfaces**: Well-defined input/output contracts
-3. **Stateless Agents**: No instance variables that accumulate state
-4. **Constructor Injection**: All configuration passed at initialization
-5. **CLI Independence**: Agents work without CLI layer
-
-### Example: Using Agents Outside CLI
-
-**In a FastAPI Service**:
-```python
-from src.agents.custom_agent import MyAgent
-from src.common.config import AgentConfig
-from src.common.types import AgentContext
-
-config = AgentConfig(system_prompt="...", model="gpt-4", api_key=api_key)
-agent = MyAgent(config)
-
-@app.post("/chat")
-async def chat(message: str, session_id: str):
-    context = AgentContext(
-        input=message,
-        conversation_history=load_history(session_id),
-        session_id=session_id
-    )
-    response = await agent.process(context)
-    save_message(session_id, "assistant", response.output)
-    return {"response": response.output}
-```
-
-**In a Jupyter Notebook**:
-```python
-from src.agents.custom_agent import MyAgent
-from src.common.config import AgentConfig
-from src.common.types import AgentContext
-
-agent = MyAgent(AgentConfig(system_prompt="...", api_key="..."))
-
-context = AgentContext(
-    input="What is the meaning of life?",
-    conversation_history=[],
-    session_id="notebook_session"
-)
-
-response = await agent.process(context)
-print(response.output)
-```
-
-**In a Batch Script**:
-```python
-for query in queries:
-    context = AgentContext(
-        input=query,
-        conversation_history=[],
-        session_id=f"batch_{i}"
-    )
-    response = await agent.process(context)
-    save_result(response.output)
-```
-
-## Configuration Strategy
-
-### Environment Variables (CLI Level)
-Used by CLI to instantiate agents with proper credentials:
-- `ANTHROPIC_API_KEY`
-- `OPENAI_API_KEY`
-- `DEFAULT_MODEL`
-- `DEFAULT_TEMPERATURE`
-- `DEFAULT_MAX_TOKENS`
-
-### Configuration Objects (Agent Level)
-Passed to agent constructors:
-- `AgentConfig`: Agent-specific settings
-- Runtime configuration, not environment-dependent
-- Allows multiple agents with different configs in same process
-
-## Testing Strategy
-
-### Framework Testing
-- **Unit Tests**: Mock agents, test CLI logic
-- **Integration Tests**: End-to-end with mock agent
-- **Coverage Target**: 80%+ for framework code
-
-### Agent Testing (User Responsibility)
-- Users test their own agent implementations
-- Framework provides `MockAgent` for testing CLI integrations
-- Example tests provided for reference
-
-## Extensibility Points
-
-### Adding New Agent Implementations
-
-This is the primary use case for the framework:
-
-1. Create new agent class inheriting from `AgentInterface`
-2. Implement `async def process(context: AgentContext) -> AgentResponse`
-3. Accept `AgentConfig` in constructor
-4. Choose LLM provider and integrate directly
-5. Choose agentic framework (Agno, LangGraph, CrewAI, etc.) or go framework-less
-6. Write tests
-7. Instantiate and pass to `SessionManager`
-
-Example:
-```python
-from src.agents.base import AgentInterface
-from src.common.types import AgentContext, AgentResponse
-from src.common.config import AgentConfig
-
-class MyCustomAgent(AgentInterface):
-    def __init__(self, config: AgentConfig):
-        self.config = config
-        # Initialize your LLM client, framework, etc.
-
-    async def process(self, context: AgentContext) -> AgentResponse:
-        # Your agent logic here
-        # Access context.input, context.conversation_history, etc.
-        # Call your LLM, run your framework, etc.
-        return AgentResponse(
-            output="Your response",
-            metadata={"model": "...", "tokens": 123}
-        )
-```
-
-### Extending the CLI (Less Common)
-
-The CLI is meant to be stable, but you can:
-- Add new commands in `parser.py` and `session_manager.py`
-- Customize formatters in `formatters.py`
-- Add new export formats in `exporter.py`
-
-### Post-MVP Enhancements
-
-Future framework enhancements could include:
-- Streaming response support
-- Conversation summarization
-- Persistent session storage (SQLite, Redis)
-- Token/cost tracking
-- Multi-session management
-- Plugin system
-- Web UI alternative to CLI
-
-## Security Considerations
-
-### API Key Management
-- Store in `.env` file (never commit)
-- Load at CLI level or in agent implementations
-- Pass to agents via `AgentConfig`
-- No hardcoded keys
-
-### Input Validation
-- User input validated before processing
-- Type checking via Pydantic throughout
-- Agents should sanitize their own inputs for their specific providers
-
-## Performance Considerations
-
-### Response Time
-- Async operations throughout
-- Agents can implement streaming (framework supports it)
-- Connection pooling responsibility of agent implementations
-
-### Memory Usage
-- Sessions stored in memory during runtime
-- No automatic cleanup (CLI sessions are short-lived)
-- Export and exit to clear memory
-- Future: configurable message limits
-
-## Future Architecture Evolution
-
-### From CLI to Web Service
-
-```mermaid
-graph TD
-    A[Current: CLI] --> B[Agent Interface]
-    C[Future: FastAPI] --> B
-    D[Future: Streamlit] --> B
-    E[Future: Jupyter] --> B
-```
-
-The agent implementations remain unchanged. Only the orchestration layer changes.
-
-### Scaling Considerations
-- Stateless agents enable horizontal scaling
-- Session state could move to Redis
-- Agent instances can be pooled
-- Rate limiting at service boundary
-- Load balancing across instances
 
 ## Module Dependencies
 
@@ -450,8 +327,10 @@ graph TD
     CLI[cli/] --> SESS[cli/session.py]
     CLI --> AGENT[agents/]
     CLI --> COMMON[common/]
+    CLI --> MEMORY[memory/]
     AGENT --> COMMON
     SESS --> COMMON
+    MEMORY --> COMMON
 ```
 
 **Key Principle**: Dependency flow is one-way. Agent module depends only on common types, never on CLI.
