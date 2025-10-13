@@ -144,10 +144,6 @@ agentic-ai-cli/
 │   ├── common/                  # Common tests
 │   └── fixtures/                # Test data and mocks
 │
-├── examples/
-│   ├── custom_agent.py          # Example custom agent implementation
-│   ├── echo_agent.py            # Simple echo agent
-│   └── llm_agent.py             # Example LLM-powered agent
 │
 ├── docs/
 │   ├── getting-started.md           # Quick start guide
