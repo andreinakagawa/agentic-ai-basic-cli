@@ -139,10 +139,6 @@ uv run pytest tests/memory/test_context_tracker.py -v
 4. **Portability over Features**: Agents work anywhere, not just in CLI
 5. **Simplicity over Completeness**: Provide essentials, let users extend
 
-## Contributing
-
-Contributions are welcome! Please check the [developer guide](docs/developer-guide.md) for guidelines.
-
 ## License
 
 MIT License
