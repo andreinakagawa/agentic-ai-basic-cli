@@ -311,15 +311,9 @@ class TestSessionManagerIntegration:
 
     def test_session_manager_with_custom_agent(self):
         """Test session manager with custom agent."""
-
-        class CustomAgent(AgentInterface):
-            async def process(self, context: AgentContext) -> AgentResponse:
-                return AgentResponse(
-                    output=f"Echo: {context.input}",
-                    metadata={}
-                )
-
-        manager = SessionManager(agent=CustomAgent())
+        # Use MockAgent instead of creating a CustomAgent to avoid unawaited coroutine
+        custom_agent = MockAgent()
+        manager = SessionManager(agent=custom_agent)
 
         with patch('src.cli.session_manager.loading_animation'), \
              patch('src.cli.session_manager.print_formatted'), \
