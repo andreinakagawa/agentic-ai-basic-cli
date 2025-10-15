@@ -22,6 +22,9 @@ This framework handles the boring infrastructure (CLI commands, session state, t
 - **Export Functionality**: Save conversations to text files
 - **Testing Ready**: Includes mock agent and comprehensive test suite
 
+## Screenshots
+![cli](img/basic_screenshot.png)
+
 ## Quick Start
 
 ### Installation
