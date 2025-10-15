@@ -2,6 +2,13 @@
 
 A generic, pluggable framework for building and testing conversational AI agents. This framework provides a complete CLI interface with session management, message history, and conversation export - all while remaining completely agent-agnostic.
 
+## Developing with Claude
+This project was developed with extensive support from Claude Code (including this README file you're reading now). It originated from another project where I was testing some AI Agents and wanted a quick way to test them and it was a good idea to use a cli for that.
+So, this project started from there where the goal was to extract the cli from this other project and enforce an architecture that was flexible enough to easily plug any agent into it.
+The development steps started with the [CLAUDE.md](CLAUDE.md) instructions and the [architecture](docs/architecture.md) document. Then, I pasted relevant files into this project and based on the instructions and architecture, we went module by module and removed the necessary code to adhere to the architecture and the philosophy of keeping the cli and agents separated and portable for the latter.
+Each step involved creating unit tests and let claude run such tests to validate if they pass and work as expected.
+Afterwards, the other docs in the 'docs' folder were created and added with the goal of the docs/ folder being the central knowledge source for overall project understanding and can always be pointed out to claude when a new session starts. In that case, the idea is to point claude to read the [getting started](docs/docs/getting-started.md) and the [architecture](docs/architecture.md) docs first and then just take it from there.
+
 ## What is This?
 
 This framework handles the boring infrastructure (CLI commands, session state, token tracking, message history) so you can focus on building great agents. Your agents can use any LLM provider (OpenAI, Anthropic, etc.) and any agentic framework (LangGraph, CrewAI, Agno) or none at all - it's completely up to you.
