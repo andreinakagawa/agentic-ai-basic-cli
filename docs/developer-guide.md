@@ -23,21 +23,17 @@ Create a new file in `src/agents/` or in your own package:
 
 ```python
 from src.agents.base import AgentInterface
-from src.common.types import AgentContext, AgentResponse, AgentConfig
-import os
+from src.common.types import AgentContext, AgentResponse
+from src.common.config import AgentConfig
 
 class MyCustomAgent(AgentInterface):
-    def __init__(self, api_key: str = None, model: str = None, temperature: float = 0.7):
-        # Agent handles its own configuration
-        # Use AgentConfig convenience class (optional)
-        self.config = AgentConfig(
-            api_key=api_key or os.getenv("OPENAI_API_KEY"),
-            model=model or os.getenv("DEFAULT_MODEL", "gpt-4"),
-            temperature=temperature
-        )
+    def __init__(self, config: AgentConfig):
+        # Store the provided configuration
+        self.config = config
 
         # Initialize your LLM client
-        # Example: self.client = OpenAI(api_key=self.config.api_key)
+        # Example: from openai import AsyncOpenAI
+        # self.client = AsyncOpenAI(api_key=self.config.api_key)
 
     async def process(self, context: AgentContext) -> AgentResponse:
         # Access the current user input
@@ -69,14 +65,24 @@ class MyCustomAgent(AgentInterface):
 Update `src/cli/main.py` to use your agent:
 
 ```python
+import os
 from src.agents.my_custom_agent import MyCustomAgent
+from src.common.config import AgentConfig
 
-# In the main() function
-agent = MyCustomAgent()  # Agent handles its own config loading
+# In the main() function or start command
+# Load config from environment variables
+config = AgentConfig(
+    api_key=os.getenv("OPENAI_API_KEY"),
+    model=os.getenv("DEFAULT_MODEL", "gpt-4"),
+    temperature=float(os.getenv("DEFAULT_TEMPERATURE", "0.7"))
+)
+
+# Create agent with config
+agent = MyCustomAgent(config)
 session_manager = SessionManager(agent=agent)
 ```
 
-That's it! The agent loads its own configuration from environment variables.
+The CLI loads configuration from environment variables and passes it to the agent via constructor.
 
 ### Step 3: Run and Test
 
@@ -95,13 +101,18 @@ One of the key features of this framework is that agents are **completely portab
 ```python
 from fastapi import FastAPI
 from src.agents.my_custom_agent import MyCustomAgent
+from src.common.config import AgentConfig
 from src.common.types import AgentContext, Message
 
 app = FastAPI()
 
-# Initialize agent once at startup
-# Pass explicit config or let it use defaults/env vars
-agent = MyCustomAgent(api_key="your-api-key", model="gpt-4")
+# Initialize agent once at startup with explicit config
+config = AgentConfig(
+    api_key="your-api-key",
+    model="gpt-4",
+    temperature=0.7
+)
+agent = MyCustomAgent(config)
 
 # In-memory session storage (replace with Redis in production)
 sessions = {}
@@ -136,14 +147,16 @@ async def chat(message: str, session_id: str):
 
 ```python
 from src.agents.my_custom_agent import MyCustomAgent
+from src.common.config import AgentConfig
 from src.common.types import AgentContext
 
 # Initialize agent with explicit config
-agent = MyCustomAgent(
+config = AgentConfig(
     api_key="your-key-here",
     model="gpt-4",
     temperature=0.7
 )
+agent = MyCustomAgent(config)
 
 # Single interaction
 context = AgentContext(
@@ -160,12 +173,18 @@ print(response.output)
 
 ```python
 import asyncio
+import os
 from src.agents.my_custom_agent import MyCustomAgent
+from src.common.config import AgentConfig
 from src.common.types import AgentContext
 
 async def process_batch(queries: list[str]):
-    # Agent loads config from environment or uses defaults
-    agent = MyCustomAgent()
+    # Load config from environment variables
+    config = AgentConfig(
+        api_key=os.getenv("OPENAI_API_KEY"),
+        model=os.getenv("DEFAULT_MODEL", "gpt-4")
+    )
+    agent = MyCustomAgent(config)
 
     results = []
     for i, query in enumerate(queries):
@@ -188,61 +207,76 @@ results = asyncio.run(process_batch(queries))
 
 ## Configuration Patterns
 
-### Pattern 1: Environment Variables with Defaults
+### Pattern 1: Basic Constructor with AgentConfig
 
 ```python
-class MyAgent(AgentInterface):
-    def __init__(self, api_key: str = None, model: str = None):
-        self.api_key = api_key or os.getenv("OPENAI_API_KEY")
-        self.model = model or os.getenv("DEFAULT_MODEL", "gpt-4")
+from src.agents.base import AgentInterface
+from src.common.config import AgentConfig
+from src.common.types import AgentContext, AgentResponse
 
-        if not self.api_key:
-            raise ValueError("API key must be provided or set in OPENAI_API_KEY")
+class MyAgent(AgentInterface):
+    def __init__(self, config: AgentConfig):
+        if not config.api_key:
+            raise ValueError("API key must be provided in AgentConfig")
+        self.config = config
+        # Initialize your LLM client here
 ```
 
 **Usage:**
 ```python
-# Uses env vars
-agent = MyAgent()
+import os
+from src.common.config import AgentConfig
+
+# Load from env vars
+config = AgentConfig(
+    api_key=os.getenv("OPENAI_API_KEY"),
+    model=os.getenv("DEFAULT_MODEL", "gpt-4")
+)
+agent = MyAgent(config)
 
 # Explicit config
-agent = MyAgent(api_key="sk-...", model="gpt-4-turbo")
+config = AgentConfig(api_key="sk-...", model="gpt-4-turbo")
+agent = MyAgent(config)
 ```
 
-### Pattern 2: Using AgentConfig Convenience Class
+### Pattern 2: Optional Config with Defaults
 
 ```python
-from src.common.types import AgentConfig
+from src.agents.base import AgentInterface
+from src.common.config import AgentConfig
+from src.common.types import AgentContext, AgentResponse
 
 class MyAgent(AgentInterface):
-    def __init__(self, **kwargs):
-        # Use AgentConfig for validation and defaults
-        self.config = AgentConfig(
-            api_key=kwargs.get("api_key") or os.getenv("OPENAI_API_KEY"),
-            model=kwargs.get("model", "gpt-4"),
-            temperature=kwargs.get("temperature", 0.7),
-            max_tokens=kwargs.get("max_tokens", 4096)
+    def __init__(self, config: AgentConfig | None = None):
+        # Use provided config or create default
+        self.config = config or AgentConfig(
+            model="gpt-4",
+            temperature=0.7,
+            max_tokens=4096
         )
 ```
 
-### Pattern 3: Config File Loading
+### Pattern 3: Config File Loading (Advanced)
 
 ```python
 import json
+import os
+from src.agents.base import AgentInterface
+from src.common.config import AgentConfig
 
 class MyAgent(AgentInterface):
-    def __init__(self, config_path: str = None):
-        if config_path:
-            with open(config_path) as f:
-                config_data = json.load(f)
-        else:
-            # Fallback to env vars
-            config_data = {
-                "api_key": os.getenv("OPENAI_API_KEY"),
-                "model": os.getenv("DEFAULT_MODEL", "gpt-4")
-            }
+    def __init__(self, config: AgentConfig):
+        self.config = config
 
-        self.config = AgentConfig(**config_data)
+# Usage - load config outside agent
+def load_config_from_file(config_path: str) -> AgentConfig:
+    with open(config_path) as f:
+        config_data = json.load(f)
+    return AgentConfig(**config_data)
+
+# Use it
+config = load_config_from_file("agent_config.json")
+agent = MyAgent(config)
 ```
 
 ### Pattern 4: Custom Config Class
@@ -273,15 +307,17 @@ Test your agent logic in isolation:
 ```python
 import pytest
 from src.agents.my_custom_agent import MyCustomAgent
+from src.common.config import AgentConfig
 from src.common.types import AgentContext, Message
 
 @pytest.mark.asyncio
 async def test_agent_responds_to_input():
     # Initialize agent with test config
-    agent = MyCustomAgent(
+    config = AgentConfig(
         api_key="test-key",
         model="gpt-4"
     )
+    agent = MyCustomAgent(config)
 
     context = AgentContext(
         input="Hello",
@@ -319,10 +355,12 @@ When testing, mock external API calls:
 
 ```python
 from unittest.mock import Mock, AsyncMock
+from src.common.config import AgentConfig
 
 @pytest.mark.asyncio
 async def test_agent_with_mock_llm():
-    agent = MyCustomAgent(api_key="test-key")
+    config = AgentConfig(api_key="test-key", model="gpt-4")
+    agent = MyCustomAgent(config)
 
     # Mock the LLM client
     mock_client = Mock()
@@ -415,9 +453,9 @@ def export_to_markdown(messages: list[Message], filepath: str):
 
 ### ✅ DO:
 
-- **Accept optional parameters** in agent constructor with sensible defaults
-- **Load environment variables** inside your agent constructor
-- **Use AgentConfig** as a convenience if it fits your needs (optional)
+- **Accept AgentConfig** in agent constructor (dependency injection)
+- **Load environment variables** in the caller (main.py, web app, etc.), not in agents
+- **Use AgentConfig** from `src.common.config` for configuration
 - **Return token counts** in metadata for automatic context management
 - **Keep agents stateless** - don't store conversation history in instance variables
 - **Handle errors gracefully** - return error messages as responses, don't crash
@@ -435,19 +473,28 @@ def export_to_markdown(messages: list[Message], filepath: str):
 ### Configuration Guidelines
 
 ```python
-# ✅ Good: Agent loads its own config
+# ✅ Good: Agent receives config via constructor
 class MyAgent(AgentInterface):
-    def __init__(self, api_key: str = None, model: str = None):
-        self.api_key = api_key or os.getenv("OPENAI_API_KEY")
-        self.model = model or os.getenv("DEFAULT_MODEL", "gpt-4")
+    def __init__(self, config: AgentConfig):
+        self.config = config
+        # Initialize LLM client with config
 
-# ✅ Good: CLI doesn't know about config
-agent = MyAgent()  # Uses env vars
-agent = MyAgent(api_key="...", model="gpt-4")  # Explicit config
+# ✅ Good: Caller loads env vars and creates config
+config = AgentConfig(
+    api_key=os.getenv("OPENAI_API_KEY"),
+    model=os.getenv("DEFAULT_MODEL", "gpt-4")
+)
+agent = MyAgent(config)
 
-# ❌ Bad: CLI builds config (coupling)
-config = AgentConfig(api_key=os.getenv("..."), ...)
-agent = MyAgent(config)  # Agent depends on CLI's config structure
+# ✅ Also Good: Optional config for flexibility (like MockAgent)
+class MyAgent(AgentInterface):
+    def __init__(self, config: AgentConfig | None = None):
+        self.config = config or AgentConfig()
+
+# ❌ Bad: Agent reads env vars directly
+class MyAgent(AgentInterface):
+    def __init__(self):
+        self.api_key = os.getenv("OPENAI_API_KEY")  # Breaks portability
 ```
 
 ### Error Handling
