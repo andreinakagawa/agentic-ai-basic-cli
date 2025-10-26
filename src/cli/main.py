@@ -1,8 +1,12 @@
 """Main CLI entry point for Agentic AI CLI Framework."""
 
 import click
+from dotenv import load_dotenv
 
 from src.cli.session_manager import SessionManager
+
+# Load environment variables from .env file
+load_dotenv()
 
 
 @click.group()
